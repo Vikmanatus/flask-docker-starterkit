@@ -24,7 +24,7 @@ jobs:
       # Failing on those means a permanently red build that teaches everyone to
       # ignore this job, which is worse than not running it.
       - name: Scan for known vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: starterkit:scan
           format: table
