@@ -10,3 +10,10 @@ __pycache__
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+
+# PyCharm: machine-specific project config. Run configurations are shared
+# deliberately; SDK and module files are not portable between machines.
+.idea/misc.xml
+.idea/modules.xml
+.idea/*.iml
+.idea/inspectionProfiles/

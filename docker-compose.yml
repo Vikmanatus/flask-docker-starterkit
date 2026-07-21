@@ -31,6 +31,31 @@ services:
     environment:
       APP_ENV: development
 
+  # PyCharm counterpart of `debugger`. The debug connection runs the other way
+  # round -- the IDE listens, the container dials it -- so 5678 is not published
+  # here. Start the "PyCharm Debug Server" run configuration first.
+  debugger-pycharm:
+    image: flask-docker-starterkit:debugger-pycharm
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      target: debugger-pycharm
+      args:
+        # Must match your PyCharm build; see the Dockerfile stage for why.
+        PYCHARM_BUILD: ${PYCHARM_BUILD:-261.26222.68}
+    ports:
+      - "${APP_PORT:-5000}:5000"
+    volumes:
+      - .:/app:cached
+    # Docker Desktop resolves host.docker.internal already; native Linux does
+    # not, and without this the container has no route back to the IDE.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    environment:
+      APP_ENV: development
+      PYCHARM_DEBUG_PORT: ${DEBUG_PORT:-5678}
+
   test-runner:
     image: flask-docker-starterkit:test
     build:

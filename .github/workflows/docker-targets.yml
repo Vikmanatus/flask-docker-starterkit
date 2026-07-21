@@ -1,0 +1,125 @@
+name: Docker targets
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # The other workflows build `test` and `production` only. That left the
+  # development and debugger targets uncovered: a broken debugger image reached
+  # main green, because nothing built it. Targets are discovered from the
+  # Dockerfile rather than listed here, so a target added later is covered
+  # without anyone remembering to update this file.
+  build-targets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build every target in the Dockerfile
+        run: |
+          targets=$(grep -oiE '^FROM .* AS [A-Za-z0-9_.-]+[[:space:]]*$' Dockerfile \
+                    | awk '{print $NF}')
+          if [ -z "$targets" ]; then
+            echo "::error::no build targets found -- has the Dockerfile changed shape?"
+            exit 1
+          fi
+          echo "Discovered targets:"; echo "$targets" | sed 's/^/  - /'
+          for t in $targets; do
+            echo "::group::build $t"
+            docker build --target "$t" -t "starterkit:$t" . || {
+              echo "::error::target '$t' failed to build"; exit 1; }
+            echo "::endgroup::"
+          done
+
+  # The PyCharm debugger has two failure modes that a plain build will not catch,
+  # and both have already happened once:
+  #   1. pydevd-pycharm is pinned to a single IDE build. A stale pin installs but
+  #      the API moves under it -- `stdoutToServer` became `stdout_to_server`,
+  #      which only surfaced at runtime as a TypeError on startup.
+  #   2. The whole point of this target is surviving a hot reload. That is a
+  #      runtime behaviour; nothing about it shows up in a build.
+  #
+  # Known limit: CI cannot run PyCharm, so nothing here exercises an *attached*
+  # session, which is the state the original crash needed. This covers the pin,
+  # the call signature, startup, reload survival and the unattached fallback --
+  # the attached path still needs a human with the IDE open.
+  debugger-pycharm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate required .env file
+        run: cp .env.example .env
+
+      - name: Build
+        run: docker compose build debugger-pycharm
+
+      # bind() raises TypeError if settrace no longer accepts what debug.py
+      # passes, turning a runtime crash into a build failure with a clear cause.
+      - name: Check the pydevd settrace contract
+        run: |
+          docker compose run --rm --no-deps --entrypoint python debugger-pycharm -c "
+          import inspect, pydevd_pycharm
+          inspect.signature(pydevd_pycharm.settrace).bind('host', port=5678, suspend=False)
+          print('settrace accepts the arguments debug.py passes')
+          "
+
+      - name: Start
+        run: docker compose up -d debugger-pycharm
+
+      - name: Serve, hot reload, and still be alive afterwards
+        run: |
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:5000/health >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5000/health >/dev/null || {
+            echo "::error::debugger-pycharm never became healthy"
+            docker compose logs debugger-pycharm; exit 1; }
+
+          # The regression this target exists to prevent: with a debugger
+          # attached the reload child used to exit 1 and take the container
+          # with it. Touching a source file is what triggered it.
+          touch flask_starterkit/main/routes/health.py
+          sleep 5
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:5000/health >/dev/null && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:5000/health >/dev/null || {
+            echo "::error::did not serve again after a hot reload"
+            docker compose logs debugger-pycharm; exit 1; }
+
+          # Via `docker inspect` rather than `compose ps --format`: older compose
+          # versions cannot parse a Go template there and fail the step for the
+          # wrong reason.
+          cid=$(docker compose ps -aq debugger-pycharm | head -1)
+          state=$(docker inspect -f '{{.State.Status}}' "$cid")
+          if [ "$state" != "running" ]; then
+            echo "::error::container is '$state' after a hot reload"
+            docker compose logs debugger-pycharm; exit 1
+          fi
+          echo "container survived the reload"
+
+          # A reload that never happened would pass every check above.
+          if ! docker compose logs debugger-pycharm 2>&1 | grep -qa "Restarting with stat"; then
+            echo "::error::no reload was triggered -- this test proves nothing"
+            docker compose logs debugger-pycharm; exit 1
+          fi
+
+      # No debug server listens in CI, so this also pins the degradation path:
+      # an unattached container must serve, not die.
+      - name: Check it degrades to a warning without a debug server
+        run: |
+          docker compose logs debugger-pycharm 2>&1 \
+            | grep -q "continuing without a debugger" || {
+              echo "::error::expected the no-debug-server warning"
+              docker compose logs debugger-pycharm; exit 1; }
+
+      - name: Tear down
+        if: always()
+        run: docker compose down --remove-orphans || true
