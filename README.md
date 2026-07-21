@@ -38,6 +38,32 @@ out and never bind.
 
 Happy debugging! 🚀
 
+## 🐛 Run with the PyCharm debugger
+
+PyCharm needs the connection the other way round — the IDE listens, the container
+dials it:
+
+- Run the **`PyCharm Debug Server`** configuration first (it listens on `5678`)
+- Then `docker compose up debugger-pycharm`
+
+Hot reload stays active, because each reload child attaches on its own.
+
+**`pydevd-pycharm` must match your PyCharm build.** It ships one release per build and
+refuses to talk to any other. Read yours from `Help > About` — `PY-261.26222.68` means
+build `261.26222.68` — and if it differs from the default in the
+[Dockerfile](Dockerfile):
+
+```bash
+PYCHARM_BUILD=<your-build> docker compose build debugger-pycharm
+```
+
+> [!NOTE]
+> The `debugger` target above does **not** work with PyCharm. `pydevd` propagates a
+> debug session into Werkzeug's reload child by injecting a connect-back address that
+> only exists inside the parent process, so the first hot reload ends in
+> `ConnectionRefusedError` and the container exits `1`. That is what this separate
+> target exists to avoid.
+
 ## 🧪 Run tests
 
 ```bash
@@ -129,7 +155,7 @@ secrets must never end up in an image layer.
 - Structured (JSON) logging to stdout
 - Unit tests with coverage, plus a production-image smoke test in CI
 - Linting and formatting with `ruff`
-- VSCode debugger with hot reload
+- VSCode & PyCharm debugger with hot reload
 - Automated dependency updates via Dependabot
 
 ## 🤝 Contributing
