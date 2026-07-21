@@ -1,0 +1,19 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="PyCharm Debug Server" type="PyRemoteDebugConfigurationType" factoryName="Python Remote Debug">
+    <option name="PORT" value="5678" />
+    <option name="HOST" value="localhost" />
+    <option name="USE_PATH_MAPPING" value="true" />
+    <option name="LOCAL_PROJECT_ROOT" value="$PROJECT_DIR$" />
+    <option name="REMOTE_PROJECT_ROOT" value="/app" />
+    <option name="REDIRECT_OUTPUT" value="false" />
+    <option name="SUSPEND_AFTER_CONNECT" value="false" />
+    <PathMappingSettings>
+      <option name="pathMappings">
+        <list>
+          <mapping local-root="$PROJECT_DIR$" remote-root="/app" />
+        </list>
+      </option>
+    </PathMappingSettings>
+    <method v="2" />
+  </configuration>
+</component>

@@ -3,6 +3,7 @@
 # Multi-stage build. Targets:
 #   development -- flask dev server, for `docker compose up app`
 #   debugger    -- debugpy, waits for VSCode to attach
+#   debugger-pycharm -- pydevd, dials out to a PyCharm debug server
 #   test        -- pytest, includes dev-only dependencies
 #   production  -- gunicorn, runtime dependencies only
 #
@@ -56,10 +57,28 @@ RUN python -m pip install --no-cache-dir debugpy==1.8.21
 USER appuser
 EXPOSE 5678
 # -Xfrozen_modules=off: on Python 3.11+ frozen stdlib modules make debugpy miss
-# breakpoints intermittently. The reloader stays enabled -- debugpy attaches with
-# --multiprocess, so it follows Werkzeug's reload child and breakpoints survive.
+# breakpoints intermittently. The reloader stays enabled -- debugpy propagates the
+# session into Werkzeug's reload child, so breakpoints survive a restart.
 CMD ["python", "-Xfrozen_modules=off", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", \
      "-m", "flask", "--app", "run:app", "run", "--host", "0.0.0.0", "--port", "5000"]
+
+
+# --- Debugger (PyCharm): dials out to a listening IDE instead of being dialled -
+# The stage above cannot serve PyCharm: pydevd propagates a session into the
+# reload child by injecting an address that only exists in the parent process,
+# so the first hot reload exits 1 and takes the container down. Here the app
+# connects out to a PyCharm "Python Debug Server" and each reload child attaches
+# for itself -- see flask_starterkit/main/debug.py.
+FROM base AS debugger-pycharm
+ENV APP_ENV=development FLASK_DEBUG=1 PYDEVD_DISABLE_FILE_VALIDATION=1 PYCHARM_DEBUG=1
+# pydevd-pycharm ships one release per IDE build and refuses to talk to any
+# other. Read your build from Help > About (PY-261.26222.68 -> 261.26222.68) and
+# override on mismatch:  docker compose build --build-arg PYCHARM_BUILD=... debugger-pycharm
+ARG PYCHARM_BUILD=261.26222.68
+RUN python -m pip install --no-cache-dir pydevd-pycharm==${PYCHARM_BUILD}
+USER appuser
+# No EXPOSE 5678: the connection is outbound, to the IDE.
+CMD ["python", "-Xfrozen_modules=off", "-m", "flask", "--app", "run:app", "run", "--host", "0.0.0.0", "--port", "5000"]
 
 
 # --- Test: dev dependencies live here and nowhere else ------------------------
