@@ -17,7 +17,7 @@ jobs:
   build-targets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build every target in the Dockerfile
         run: |
@@ -50,7 +50,7 @@ jobs:
   debugger-pycharm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate required .env file
         run: cp .env.example .env
