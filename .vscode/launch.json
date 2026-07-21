@@ -6,16 +6,20 @@
     "configurations": [
         {
             "name": "Python: Remote Attach",
-            "type": "python",
+            // "debugpy" replaces the legacy "python" type used by older
+            // versions of the VSCode Python extension.
+            "type": "debugpy",
             "request": "attach",
             "connect": {
                 "host": "localhost",
                 "port": 5678
             },
+            // remoteRoot must match WORKDIR in the Dockerfile, otherwise
+            // breakpoints never bind and show up greyed out.
             "pathMappings": [
                 {
                     "localRoot": "${workspaceFolder}",
-                    "remoteRoot": "/flask_starterkit"
+                    "remoteRoot": "/app"
                 }
             ],
             "justMyCode": true

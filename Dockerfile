@@ -1,46 +1,84 @@
-# For more information, please refer to https://aka.ms/vscode-docker-python
-FROM python:3.10-slim as base
+# syntax=docker/dockerfile:1
+#
+# Multi-stage build. Targets:
+#   development -- flask dev server, for `docker compose up app`
+#   debugger    -- debugpy, waits for VSCode to attach
+#   test        -- pytest, includes dev-only dependencies
+#   production  -- gunicorn, runtime dependencies only
+#
+# The base image is pinned by digest so a rebuild six months from now produces
+# the same image. Dependabot keeps the digest current (see .github/dependabot.yml).
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# Apply Debian security patches published since this base image was built. The
+# digest pin fixes the starting point; without this the image carries whatever
+# CVEs were open on build day until upstream republishes the tag.
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create the unprivileged user up front: it is a stable layer, so it caches.
+RUN adduser --uid 5678 --disabled-password --gecos "" appuser
+
+# Dependencies before source, so editing a .py file does not reinstall the world.
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+COPY --chown=appuser:appuser . /app
 
 EXPOSE 5000
 
-# Keeps Python from generating .pyc files in the container
-ENV PYTHONDONTWRITEBYTECODE=1
+# Shared by every target. Uses urllib because the slim image has no curl.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=2).status == 200 else 1)"]
 
-# Turns off buffering for easier container logging
-ENV PYTHONUNBUFFERED=1
 
-# Install pip requirements
-COPY requirements.txt .
-RUN python -m pip install -r requirements.txt
-
-WORKDIR /flask_starterkit
-COPY . /flask_starterkit
-
-# Creates a non-root user with an explicit UID and adds permission to access the /app folder
-# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
-RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /flask_starterkit
+# --- Development: hot reload, source bind-mounted over /app by compose --------
+FROM base AS development
+ENV APP_ENV=development FLASK_DEBUG=1
 USER appuser
-
-# Degguer config
-FROM base as debugger
-
-RUN pip install debugpy
-
-CMD ["python", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", "-m", "flask", "run", "-h","0.0.0.0" , "-p","5000"]
-
-# Flask server in dev mode
-FROM base as debug
-CMD ["flask", "run", "--host", "0.0.0.0"]
-
-FROM base as test
-
-RUN pip install pytest
-
-CMD ["python","-m","pytest"]
+CMD ["flask", "--app", "run:app", "run", "--host", "0.0.0.0", "--port", "5000"]
 
 
-# Production image
-FROM base as prod
+# --- Debugger: identical, but waits for the VSCode debugger to attach ---------
+FROM base AS debugger
+# PYDEVD_DISABLE_FILE_VALIDATION silences a startup notice that is expected here.
+ENV APP_ENV=development FLASK_DEBUG=1 PYDEVD_DISABLE_FILE_VALIDATION=1
+RUN python -m pip install --no-cache-dir debugpy==1.8.21
+USER appuser
+EXPOSE 5678
+# -Xfrozen_modules=off: on Python 3.11+ frozen stdlib modules make debugpy miss
+# breakpoints intermittently. The reloader stays enabled -- debugpy attaches with
+# --multiprocess, so it follows Werkzeug's reload child and breakpoints survive.
+CMD ["python", "-Xfrozen_modules=off", "-m", "debugpy", "--listen", "0.0.0.0:5678", "--wait-for-client", \
+     "-m", "flask", "--app", "run:app", "run", "--host", "0.0.0.0", "--port", "5000"]
 
-CMD ["flask", "run", "--host", "0.0.0.0"]
 
+# --- Test: dev dependencies live here and nowhere else ------------------------
+FROM base AS test
+ENV APP_ENV=testing
+# /app is owned by root and appuser cannot write to it -- deliberate, so the app
+# can never rewrite its own code. That means pytest's scratch files need to go
+# somewhere else, or coverage dies with "unable to open database file" (which is
+# an INTERNALERROR, not a test failure, and is easy to mistake for a pass).
+ENV COVERAGE_FILE=/tmp/.coverage \
+    PYTEST_ADDOPTS="-p no:cacheprovider"
+COPY requirements-dev.txt ./
+RUN python -m pip install --no-cache-dir -r requirements-dev.txt
+USER appuser
+CMD ["python", "-m", "pytest"]
+
+
+# --- Production: gunicorn, no dev dependencies, non-root ----------------------
+FROM base AS production
+ENV APP_ENV=production
+USER appuser
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "run:app"]

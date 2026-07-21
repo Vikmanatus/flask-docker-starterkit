@@ -1,0 +1,50 @@
+[project]
+name = "flask-docker-starterkit"
+version = "1.0.0"
+description = "A boilerplate providing a complete setup to start a new Flask project"
+readme = "README.md"
+# 3.10+ for PEP 604 unions (`str | None`) evaluated at runtime.
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = [".venv", "venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Fixtures and assertions read differently from application code.
+"*_test.py" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["flask_starterkit/tests"]
+# The existing suite uses the `*_test.py` suffix; `test_*.py` is accepted too so
+# either convention works for new files.
+python_files = ["*_test.py", "test_*.py"]
+addopts = [
+    "--strict-markers",
+    "--cov=flask_starterkit",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
+]
+
+[tool.coverage.run]
+source = ["flask_starterkit"]
+omit = ["flask_starterkit/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
