@@ -1,22 +1,53 @@
-name: Run tests
+name: Tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+  # Without this, external contributions get no test signal at all before review.
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  tests:
     runs-on: ubuntu-latest
-
+    env:
+      # Job-level: docker-compose.prod.yml interpolates SECRET_KEY when the file
+      # is parsed, so even `build` needs it present, not just the run step.
+      SECRET_KEY: ci-smoke-test-secret-key-at-least-32-chars
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+
       - name: Generate required .env file
-        run: |
-          echo DEBUG=True >> .env
-          echo FLASK_DEBUG=1 >> .env
-          echo FLASK_APP=run.py >> .env
-      - name: Building containers
-        run: docker-compose build
+        run: cp .env.example .env
+
+      - name: Build test image
+        run: docker compose build test-runner
+
+      # --exit-code-from is what makes a failing test fail the build.
+      # --abort-on-container-exit alone stops the containers but always exits 0.
       - name: Run tests
-        run: docker-compose up --abort-on-container-exit test-runner
-      
+        run: docker compose up --exit-code-from test-runner test-runner
+
+      - name: Build production image
+        run: docker compose -f docker-compose.prod.yml build
+
+      - name: Smoke-test the production image
+        run: |
+          docker run -d --name smoke -p 5000:5000 \
+            -e APP_ENV=production -e SECRET_KEY="$SECRET_KEY" \
+            flask-docker-starterkit:production
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/health; then
+              echo "healthy after ${i}s" && exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::production image never became healthy"
+          docker logs smoke
+          exit 1
+
+      - name: Tear down smoke test
+        if: always()
+        run: docker rm -f smoke || true

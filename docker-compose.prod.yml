@@ -1,0 +1,31 @@
+# Production-shaped run: gunicorn, no source mount, no dev dependencies.
+#
+#   SECRET_KEY=$(python -c 'import secrets;print(secrets.token_urlsafe(32))') \
+#     docker compose -f docker-compose.prod.yml up --build
+#
+# Intended for verifying the production image locally. A real deployment should
+# supply secrets from its own secret store rather than the shell environment.
+services:
+  app:
+    image: flask-docker-starterkit:production
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      target: production
+    ports:
+      - "5000:5000"
+    environment:
+      APP_ENV: production
+      # No default: the app refuses to boot without it, which is the point.
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set for a production run}
+      LOG_FORMAT: json
+      LOG_LEVEL: info
+      # Raise only when actually behind that many reverse proxies.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true

@@ -1,33 +1,53 @@
-version: '3.4'
-
+# Development stack. For a production-shaped run see docker-compose.prod.yml.
 services:
-  flaskdockerstarterkit:
-    image: flaskdockerstarterkit
+  app:
+    image: flask-docker-starterkit:dev
     build:
       context: .
       dockerfile: ./Dockerfile
-      target: debug
+      target: development
     ports:
-      - 5000:5000
+      # Host port is overridable: on macOS, ControlCenter's AirPlay Receiver
+      # already listens on 5000. APP_PORT=5001 docker compose up app
+      - "${APP_PORT:-5000}:5000"
     volumes:
-      - .:/flask_starterkit:cached
+      - .:/app:cached
     env_file: .env
+    environment:
+      APP_ENV: development
+
   debugger:
-    image: debugger
+    image: flask-docker-starterkit:debugger
     build:
       context: .
       dockerfile: ./Dockerfile
       target: debugger
     ports:
-      - 5000:5000
-      - 5678:5678
+      - "${APP_PORT:-5000}:5000"
+      - "${DEBUG_PORT:-5678}:5678"
     volumes:
-      - .:/flask_starterkit:cached
+      - .:/app:cached
     env_file: .env
+    environment:
+      APP_ENV: development
+
   test-runner:
-    image: test-runner
+    image: flask-docker-starterkit:test
     build:
       context: .
       dockerfile: ./Dockerfile
       target: test
+    # Mounted so a test run always sees your current source. Without this the
+    # tests silently exercise whatever was copied in at the last build, which
+    # reports stale results with no indication anything is wrong.
+    # Dependency changes still need a rebuild: requirements-dev.txt is installed
+    # into the image, not mounted.
+    volumes:
+      - .:/app:cached
     env_file: .env
+    environment:
+      APP_ENV: testing
+    # The dev healthcheck would hold this container "starting" forever -- it
+    # runs pytest and exits rather than serving.
+    healthcheck:
+      disable: true

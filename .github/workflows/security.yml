@@ -1,0 +1,33 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so newly-disclosed CVEs in an unchanged image still surface.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  image-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        run: docker build --target production -t starterkit:scan .
+
+      # ignore-unfixed: Debian regularly carries CVEs with no patch available.
+      # Failing on those means a permanently red build that teaches everyone to
+      # ignore this job, which is worse than not running it.
+      - name: Scan for known vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: starterkit:scan
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
